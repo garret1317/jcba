@@ -20,7 +20,9 @@ import requests
 import websocket
 import pprint
 import http
-
+import unicodedata
+import sched
+import datetime
 
 class wss:
     def __init__(self, provider, station_id, duration=0):
@@ -73,6 +75,24 @@ class wss:
     def _on_open(self, data):
         self.ws.send(self.token)
 
+def find_programme(station, programme):
+    updates = requests.get("https://api.fmplapla.com/api/v1/mobile/updates").json().get('updates')
+
+    timetable = next(filter(
+        lambda x: x.get('station') == station
+        and x.get('type') == 'timetable', updates), None)
+
+    if timetable is None:
+        print('Timetable not found. Is the station id correct?')
+        sys.exit()
+
+    now = time.time()
+
+    for prog in timetable["data"]:
+        if unicodedata.normalize("NFKC", programme) in unicodedata.normalize("NFKC", prog["title"]):
+            if prog["end"] > time.time():
+                return prog["start"], prog["end"], prog["title"]
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -81,10 +101,38 @@ def main():
                         help='provider. jcba or fmplapla')
     parser.add_argument('-s', '--station', required=True,
                         help='station id. example: fmkaratsu')
-    parser.add_argument('-t', '--time', type=int, default=0,
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-t', '--time', type=int, default=0,
                         help='stop writing the output after its seconds reaches duration. it defaults to 0, meaning that loop forever.')
+    group.add_argument('-b', '--bangumi', '--programme',
+                        help='programme to record. It will wait until the scheduled start time, and then record until the end time. Currently only works with fmplapla.')
+
     args = parser.parse_args()
-    radio = wss(args.provider, args.station, args.time)
+
+    if not args.bangumi:
+        radio = wss(args.provider, args.station, args.time)
+    else:
+
+        if args.provider == 'jcba':
+            print('JCBA programme scheduling is currently not supported')
+            sys.exit()
+
+        start, end, title = find_programme(args.station, args.bangumi)
+        if start < time.time():
+            start = time.time()
+
+        length = end - start
+
+        pretty_start = datetime.datetime.fromtimestamp(start)
+        pretty_end = datetime.datetime.fromtimestamp(end)
+
+        sys.stderr.buffer.write(f"Recording {title} from {pretty_start} to {pretty_end}\n".encode())
+        sys.stderr.buffer.flush()
+
+        scheduler = sched.scheduler(time.time, time.sleep)
+        scheduler.enterabs(start, 1, wss, (args.provider, args.station, length))
+        scheduler.run()
 
 
 if __name__ == '__main__':
