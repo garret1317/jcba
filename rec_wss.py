@@ -78,7 +78,7 @@ def main():
     parser = argparse.ArgumentParser(
         description='example: python rec_wss.py -p jcba -s fmkaratsu -t 1800 | ffplay -i pipe:')
     parser.add_argument('-p', '--provider', required=True,
-                        help='provider. jcba or fmplapla')
+                        help='provider', choices=['jcba', 'fmplapla'])
     parser.add_argument('-s', '--station', required=True,
                         help='station id. example: fmkaratsu')
     parser.add_argument('-t', '--time', type=int, default=0,
