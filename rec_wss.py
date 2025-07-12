@@ -20,7 +20,8 @@ import requests
 import websocket
 import pprint
 import http
-
+import json
+import base64
 
 class wss:
     def __init__(self, provider, station_id, duration=0):
@@ -47,12 +48,17 @@ class wss:
             print('jcba or fmplapla.')
             sys.exit()
         res = requests.post(url, headers=headers)
-        json = res.json()
+        stream_json = res.json()
         if 'DEBUG' in os.environ:
             print(url)
-            pprint.pprint(json)
-        self.token = json['token']
-        self.location = json['location']
+            pprint.pprint(stream_json)
+        self.token = stream_json['token']
+        self.location = stream_json['location']
+
+        payload = json.loads(base64.b64decode(self.token.split('.')[1] + '=='))
+        if payload.get('sub', '').startswith('/announce'):
+            print('You are geo-blocked.')
+            sys.exit()
 
         self.ws = websocket.WebSocketApp(
             self.location,
