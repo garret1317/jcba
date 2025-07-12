@@ -75,20 +75,33 @@ class wss:
     def _on_open(self, data):
         self.ws.send(self.token)
 
-def find_programme(station, programme):
-    updates = requests.get("https://api.fmplapla.com/api/v1/mobile/updates").json().get('updates')
+def find_programme(provider, station, programme):
 
-    timetable = next(filter(
-        lambda x: x.get('station') == station
-        and x.get('type') == 'timetable', updates), None)
+    if provider == "fmplapla":
+        updates = requests.get("https://api.fmplapla.com/api/v1/mobile/updates").json().get('updates')
 
-    if timetable is None:
+        timetable = next(filter(
+            lambda x: x.get('station') == station
+            and x.get('type') == 'timetable', updates), {})
+
+        programmes = timetable.get("data")
+    elif provider == "jcba":
+        timetables_response = requests.get(f"https://api.radimo.smen.biz/api/v1/mobile/timetables?station={station}")
+
+        if timetables_response.status_code == 304:
+            print("This station does not provide a full timetable")
+            sys.exit()
+
+        timetables = timetables_response.json()
+        programmes = timetables.get("timetables")
+
+    if programmes is None:
         print('Timetable not found. Is the station id correct?')
         sys.exit()
 
     now = time.time()
 
-    for prog in timetable["data"]:
+    for prog in programmes:
         if unicodedata.normalize("NFKC", programme) in unicodedata.normalize("NFKC", prog["title"]):
             if prog["end"] > time.time():
                 return prog["start"], prog["end"], prog["title"]
@@ -113,12 +126,7 @@ def main():
     if not args.bangumi:
         radio = wss(args.provider, args.station, args.time)
     else:
-
-        if args.provider == 'jcba':
-            print('JCBA programme scheduling is currently not supported')
-            sys.exit()
-
-        start, end, title = find_programme(args.station, args.bangumi)
+        start, end, title = find_programme(args.provider, args.station, args.bangumi)
         if start < time.time():
             start = time.time()
 
