@@ -20,6 +20,9 @@ import requests
 import websocket
 import pprint
 import http
+import unicodedata
+import sched
+import datetime
 import json
 import base64
 
@@ -79,6 +82,37 @@ class wss:
     def _on_open(self, data):
         self.ws.send(self.token)
 
+def find_programme(provider, station, programme):
+
+    if provider == "fmplapla":
+        updates = requests.get("https://api.fmplapla.com/api/v1/mobile/updates").json().get('updates')
+
+        timetable = next(filter(
+            lambda x: x.get('station') == station
+            and x.get('type') == 'timetable', updates), {})
+
+        programmes = timetable.get("data")
+    elif provider == "jcba":
+        timetables_response = requests.get(f"https://api.radimo.smen.biz/api/v1/mobile/timetables?station={station}")
+
+        if timetables_response.status_code == 304:
+            print("This station does not provide a full timetable")
+            sys.exit()
+
+        timetables = timetables_response.json()
+        programmes = timetables.get("timetables")
+
+    if programmes is None:
+        print('Timetable not found. Is the station id correct?')
+        sys.exit()
+
+    now = time.time()
+
+    for prog in programmes:
+        if unicodedata.normalize("NFKC", programme) in unicodedata.normalize("NFKC", prog["title"]):
+            if prog["end"] > time.time():
+                return prog["start"], prog["end"], prog["title"]
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -87,10 +121,33 @@ def main():
                         help='provider', choices=['jcba', 'fmplapla'])
     parser.add_argument('-s', '--station', required=True,
                         help='station id. example: fmkaratsu')
-    parser.add_argument('-t', '--time', type=int, default=0,
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-t', '--time', type=int, default=0,
                         help='stop writing the output after its seconds reaches duration. it defaults to 0, meaning that loop forever.')
+    group.add_argument('-b', '--bangumi', '--programme',
+                        help='programme to record. It will wait until the scheduled start time, and then record until the end time. Currently only works with fmplapla.')
+
     args = parser.parse_args()
-    radio = wss(args.provider, args.station, args.time)
+
+    if not args.bangumi:
+        radio = wss(args.provider, args.station, args.time)
+    else:
+        start, end, title = find_programme(args.provider, args.station, args.bangumi)
+        if start < time.time():
+            start = time.time()
+
+        length = end - start
+
+        pretty_start = datetime.datetime.fromtimestamp(start)
+        pretty_end = datetime.datetime.fromtimestamp(end)
+
+        sys.stderr.buffer.write(f"Recording {title} from {pretty_start} to {pretty_end}\n".encode())
+        sys.stderr.buffer.flush()
+
+        scheduler = sched.scheduler(time.time, time.sleep)
+        scheduler.enterabs(start, 1, wss, (args.provider, args.station, length))
+        scheduler.run()
 
 
 if __name__ == '__main__':
